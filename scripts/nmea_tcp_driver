@@ -9,7 +9,7 @@
 # modification, are permitted provided that the following conditions
 # are met:
 #
-#  * Redistributions of source code must retain the above copyright
+#  * Redistributions of source code must retain the     above copyright
 #    notice, this list of conditions and the following disclaimer.
 #  * Redistributions in binary form must reproduce the above
 #    copyright notice, this list of conditions and the following
@@ -34,33 +34,83 @@
 
 import serial
 import socket               # Import socket module
-import rospy
 import os                   #import libraries necessary for running the ifconfigg.sh file
 import sys
 import libnmea_navsat_driver.driver
+import numpy as np
+import rospy
+import tf
+from sensor_msgs.msg import Imu
+from geometry_msgs.msg import PoseStamped
 
 if __name__ == '__main__':
     rospy.init_node('nmea_tcp_driver')
 
+    imu_pub = rospy.Publisher("gps_imu", Imu, queue_size=5)
+    imu_pose_pub = rospy.Publisher("gps_imu_pose", PoseStamped, queue_size=5)
+
     s = socket.socket()         # Create a socket object
-    host = rospy.get_param('~host', 'reach.local')
-    port = rospy.get_param('~port', 12346)
+    host = rospy.get_param('~host', '192.168.1.97')
+    port = rospy.get_param('~port', 5017)
 
     s.connect((host, port))
     print "Device Connected"
-    frame_id = libnmea_navsat_driver.driver.RosNMEADriver.get_frame_id()
+    # frame_id = libnmea_navsat_driver.driver.RosNMEADriver.get_frame_id()
+    frame_id = "insia_gps"
 
     try:
         GPS = s.recv(1024)
         driver = libnmea_navsat_driver.driver.RosNMEADriver()
+        roll = 0
+        pitch = 0
         while not rospy.is_shutdown():
             GPS = s.recv(1024)
-            data = GPS.strip()
-	    
+            data = GPS.strip()    
     	    split = data.split()
             data = split[0]
+            for i in range(len(split)):
+                # print('Split ', i, ': ', split[i])
+                splitsplit = split[i].split(',')
+                # for j in range(len(splitsplit)):
+                #     print('Split ', i, j, ': ', splitsplit[j])
+
+                # if splitsplit[0] == '$GPHDT':
+                #     print('Heading 1: ', splitsplit[1])
+                # if splitsplit[0] == '$GPGST':
+                #     print('GPGST: ', splitsplit)
+                # if splitsplit[0] == '$GPROT':
+                #     print('Yaw Rate: ', splitsplit[1], splitsplit[2])
+                # if splitsplit[0] == '$RMC':
+                #         print('*** RMC: ', splitsplit)
+                # if splitsplit[0] == '$ROT':
+                #         print('*** ROT: ', splitsplit)
+                if splitsplit[0] == '$PASHR':
+                       # print('*** PASHR: ', splitsplit)
+                        pitch = np.deg2rad(float(splitsplit[5])) if splitsplit[5] else 0.0
+                        roll = np.deg2rad(float(splitsplit[7])) if splitsplit[7] else 0.0
+                if splitsplit[0] == '$PTNL':
+                    if splitsplit[1] == 'AVR':
+                        print('*** IMU: ', splitsplit)
+                        # print('$PTNL AVR ', i, ': ', splitsplit)
+                        # print('Heading 2: ', splitsplit[3])
+                        # print('Tilt: ', splitsplit[5])
+                        # print('Roll: ', splitsplit[7])
+                        yaw = np.deg2rad(float(splitsplit[3]))
+                        imu_msg = Imu()
+                        imu_pose_msg = PoseStamped()
+                        imu_msg.header.frame_id = frame_id
+                        imu_msg.header.stamp = rospy.Time.now()
+                        x, y, z, w = tf.transformations.quaternion_from_euler(roll, pitch, yaw)
+                        imu_msg.orientation.x = x
+                        imu_msg.orientation.y = y
+                        imu_msg.orientation.z = z
+                        imu_msg.orientation.w = w
+                        imu_pub.publish(imu_msg)
+                        imu_pose_msg.header.frame_id = frame_id
+                        imu_pose_msg.pose.orientation = imu_msg.orientation
+                        imu_pose_pub.publish(imu_pose_msg)
     	    for el in split:
-    		  if 'GPGGA' in el:
+    		  if 'GNGGA' in el:
     		      data = el
     		      break
     		  elif 'RMC' in el:
