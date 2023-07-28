@@ -40,17 +40,21 @@ import libnmea_navsat_driver.driver
 import numpy as np
 import rospy
 import tf
+import time
+from datetime import datetime
 from sensor_msgs.msg import Imu
 from geometry_msgs.msg import PoseStamped
+from geometry_msgs.msg import TwistStamped
 
 if __name__ == '__main__':
     rospy.init_node('nmea_tcp_driver')
 
     imu_pub = rospy.Publisher("gps_imu", Imu, queue_size=5)
     imu_pose_pub = rospy.Publisher("gps_imu_pose", PoseStamped, queue_size=5)
+    vel_pub = rospy.Publisher("gps_vel", TwistStamped, queue_size=5)
 
     s = socket.socket()         # Create a socket object
-    host = rospy.get_param('~host', '192.168.1.97')
+    host = rospy.get_param('~host', '192.168.1.100')
     port = rospy.get_param('~port', 5017)
 
     s.connect((host, port))
@@ -63,14 +67,19 @@ if __name__ == '__main__':
         driver = libnmea_navsat_driver.driver.RosNMEADriver()
         roll = 0
         pitch = 0
+        gps_date = ''
+        gps_time = ''
+        gps_data = ''
         while not rospy.is_shutdown():
             GPS = s.recv(1024)
             data = GPS.strip()    
     	    split = data.split()
             data = split[0]
+            
             for i in range(len(split)):
                 # print('Split ', i, ': ', split[i])
                 splitsplit = split[i].split(',')
+                # print (splitsplit)
                 # for j in range(len(splitsplit)):
                 #     print('Split ', i, j, ': ', splitsplit[j])
 
@@ -85,42 +94,79 @@ if __name__ == '__main__':
                 # if splitsplit[0] == '$ROT':
                 #         print('*** ROT: ', splitsplit)
                 if splitsplit[0] == '$PASHR':
-                       # print('*** PASHR: ', splitsplit)
+                        # print('*** PASHR: ', splitsplit)
                         pitch = np.deg2rad(float(splitsplit[5])) if splitsplit[5] else 0.0
                         roll = np.deg2rad(float(splitsplit[7])) if splitsplit[7] else 0.0
+                if splitsplit[0] == '$GNRMC':
+                    vel_msg = TwistStamped()
+                    vel_msg.header.frame_id = frame_id
+                    if gps_date != '':
+                        #print (splitsplit[1])
+                        gps_time = splitsplit[1]
+                        gps_datetime = gps_date+gps_time
+                        dt = datetime.strptime(gps_datetime[0:-3], "%m%d%y%H%M%S")
+                        timestamp = rospy.Time.from_sec(float(time.mktime(dt.timetuple()))+3600+float('0'+gps_datetime[-3:]))
+                        vel_msg.header.stamp = rospy.Time.from_sec(timestamp.to_sec())
+
+                    vel_msg.twist.linear.z = float(splitsplit[7])*0.51444
+                    vel_pub.publish(vel_msg)
+                            
+
+                    # print (float(splitsplit[7])*0.51444*3.6)
                 if splitsplit[0] == '$PTNL':
+                    if splitsplit[1] == 'VHD':
+                        gps_date = splitsplit[3]
                     if splitsplit[1] == 'AVR':
-                        print('*** IMU: ', splitsplit)
+                        # print('*** IMU: ', splitsplit)
                         # print('$PTNL AVR ', i, ': ', splitsplit)
                         # print('Heading 2: ', splitsplit[3])
                         # print('Tilt: ', splitsplit[5])
                         # print('Roll: ', splitsplit[7])
+
                         yaw = np.deg2rad(float(splitsplit[3]))
                         imu_msg = Imu()
                         imu_pose_msg = PoseStamped()
+
                         imu_msg.header.frame_id = frame_id
-                        imu_msg.header.stamp = rospy.Time.now()
+                        imu_pose_msg.header.frame_id = frame_id
+                        if gps_date != '':
+                            # print (splitsplit[2])
+                            gps_time = splitsplit[2]
+                            gps_datetime = gps_date+gps_time
+                            dt = datetime.strptime(gps_datetime[0:-3], "%m%d%y%H%M%S")
+                            timestamp = rospy.Time.from_sec(float(time.mktime(dt.timetuple()))+3600+float('0'+gps_datetime[-3:]))
+                            imu_msg.header.stamp = rospy.Time.from_sec(timestamp.to_sec())
+                            imu_pose_msg.header.stamp = rospy.Time.from_sec(timestamp.to_sec())
+                            
+
                         x, y, z, w = tf.transformations.quaternion_from_euler(roll, pitch, yaw)
                         imu_msg.orientation.x = x
                         imu_msg.orientation.y = y
                         imu_msg.orientation.z = z
                         imu_msg.orientation.w = w
                         imu_pub.publish(imu_msg)
-                        imu_pose_msg.header.frame_id = frame_id
+                        
                         imu_pose_msg.pose.orientation = imu_msg.orientation
                         imu_pose_pub.publish(imu_pose_msg)
-    	    for el in split:
-    		  if 'GNGGA' in el:
-    		      data = el
-    		      break
-    		  elif 'RMC' in el:
-    		      data = el           
-        
 
-            try:
-                driver.add_sentence(data, frame_id)
-            except ValueError as e:
-                rospy.logwarn("Value error, likely due to missing fields in the NMEA message. Error was: %s. Please report this issue at github.com/ros-drivers/nmea_navsat_driver, including a bag file with the NMEA sentences that caused it." % e)
+    	    for el in split:
+                if 'GNGGA' in el: 
+                    gps_data = el
+                    break
+                elif 'GNRMC' in el:
+                    gps_data = el
+
+
+            if gps_date != '' and gps_data != '':
+                try:
+                    gps_time = gps_data[7:16]
+                    gps_datetime = gps_date+gps_time
+                    # print (gps_datetime)
+                    dt = datetime.strptime(gps_datetime[0:-3], "%m%d%y%H%M%S")
+                    timestamp = rospy.Time.from_sec(float(time.mktime(dt.timetuple()))+3600+float('0'+gps_datetime[-3:]))
+                    driver.add_sentence(gps_data, frame_id, timestamp)
+                except ValueError as e:
+                    rospy.logwarn("Value error, likely due to missing fields in the NMEA message. Error was: %s. Please report this issue at github.com/ros-drivers/nmea_navsat_driver, including a bag file with the NMEA sentences that caused it." % e)
 
     except rospy.ROSInterruptException:
         GPS.close           #Close GPS socket when done
