@@ -53,12 +53,15 @@ class RosNMEADriver(object):
     # Returns True if we successfully did something with the passed in
     # nmea_string
     def add_sentence(self, nmea_string, frame_id, timestamp=None):
+        print("Entre")
         if not check_nmea_checksum(nmea_string):
             rospy.logwarn("Received a sentence with an invalid checksum. " +
                           "Sentence was: %s" % repr(nmea_string))
             return False
 
         parsed_sentence = libnmea_navsat_driver.parser.parse_nmea_sentence(nmea_string)
+        print(nmea_string)
+        print(parsed_sentence)
         if not parsed_sentence:
             rospy.logdebug("Failed to parse NMEA sentence. Sentece was: %s" % nmea_string)
             return False

@@ -34,7 +34,7 @@
 
 import serial
 import socket               # Import socket module
-import os                   # import libraries necessary for running the ifconfig.sh file
+import os                   #import libraries necessary for running the ifconfigg.sh file
 import sys
 import libnmea_navsat_driver.driver
 import numpy as np
@@ -45,9 +45,6 @@ from datetime import datetime
 from sensor_msgs.msg import Imu
 from geometry_msgs.msg import PoseStamped
 from geometry_msgs.msg import TwistStamped
-import pytz
-
-
 
 if __name__ == '__main__':
     rospy.init_node('nmea_tcp_driver')
@@ -57,15 +54,13 @@ if __name__ == '__main__':
     vel_pub = rospy.Publisher("gps_vel", TwistStamped, queue_size=5)
 
     s = socket.socket()         # Create a socket object
-    host = rospy.get_param('~host', '192.168.1.205')
+    host = rospy.get_param('~host', '192.168.1.100')
     port = rospy.get_param('~port', 5017)
 
     s.connect((host, port))
-    print("Device Connected")
-    frame_id = "gnss_trimble"
-
-    # Establecer la zona horaria de España
-    spain_tz = pytz.timezone('Europe/Madrid')
+    print ("Device Connected")
+    # frame_id = libnmea_navsat_driver.driver.RosNMEADriver.get_frame_id()
+    frame_id = "insia_gps"
 
     try:
         GPS = s.recv(1024)
@@ -78,8 +73,9 @@ if __name__ == '__main__':
         while not rospy.is_shutdown():
             GPS = s.recv(1024)
             data = GPS.strip()
-            split = data.decode().split()  # Convertimos los bytes a cadena y luego hacemos el split
-
+            split = split(data)
+            data = split[0]
+            
             for i in range(len(split)):
                 # print('Split ', i, ': ', split[i])
                 splitsplit = split[i].split(',')
@@ -107,22 +103,11 @@ if __name__ == '__main__':
                     if gps_date != '':
                         #print (splitsplit[1])
                         gps_time = splitsplit[1]
-                        gps_datetime = gps_date + gps_time
-                        # timestamp = rospy.Time.from_sec(float(time.mktime(dt.timetuple()))+3600+float('0'+gps_datetime[-3:]))
-
-                        # Convertir a la zona horaria de España
+                        gps_datetime = gps_date+gps_time
                         dt = datetime.strptime(gps_datetime[0:-3], "%m%d%y%H%M%S")
-                        dt = dt.replace(tzinfo=pytz.utc)  # Asignar UTC explícitamente
-                        timestamp_sec = dt.timestamp()
-
-
-                        # Extraer los milisegundos correctamente
-                        millisec = float("0." + gps_time.split(".")[-1]) if "." in gps_time else 0.0
-                        timestamp = rospy.Time.from_sec(timestamp_sec + millisec)
-
+                        timestamp = rospy.Time.from_sec(float(time.mktime(dt.timetuple()))+3600+float('0'+gps_datetime[-3:]))
                         vel_msg.header.stamp = rospy.Time.from_sec(timestamp.to_sec())
 
-            
                     vel_msg.twist.linear.z = float(splitsplit[7])*0.51444
                     vel_pub.publish(vel_msg)
                             
@@ -148,18 +133,8 @@ if __name__ == '__main__':
                             # print (splitsplit[2])
                             gps_time = splitsplit[2]
                             gps_datetime = gps_date+gps_time
-                            # timestamp = rospy.Time.from_sec(float(time.mktime(dt.timetuple()))+3600+float('0'+gps_datetime[-3:]))
-                            
-
-                            # Convertir a un objeto datetime de España con la zona horaria correcta
                             dt = datetime.strptime(gps_datetime[0:-3], "%m%d%y%H%M%S")
-                            dt = dt.replace(tzinfo=pytz.utc)  # Asignar UTC explícitamente
-                            timestamp_sec = dt.timestamp()
-
-                            # Extraer los milisegundos correctamente
-                            millisec = float("0." + gps_time.split(".")[-1]) if "." in gps_time else 0.0
-                            timestamp = rospy.Time.from_sec(timestamp_sec + millisec)
-
+                            timestamp = rospy.Time.from_sec(float(time.mktime(dt.timetuple()))+3600+float('0'+gps_datetime[-3:]))
                             imu_msg.header.stamp = rospy.Time.from_sec(timestamp.to_sec())
                             imu_pose_msg.header.stamp = rospy.Time.from_sec(timestamp.to_sec())
                             
@@ -175,7 +150,7 @@ if __name__ == '__main__':
                         imu_pose_pub.publish(imu_pose_msg)
 
             for el in split:
-                if 'GNGGA' in el:
+                if 'GNGGA' in el: 
                     gps_data = el
                     break
                 elif 'GNRMC' in el:
@@ -186,20 +161,13 @@ if __name__ == '__main__':
             if gps_date != '' and gps_data != '':
                 try:
                     gps_time = gps_data[7:16]
-                    gps_datetime = gps_date + gps_time
-
-                    # Convertir a un objeto datetime de España con la zona horaria correcta
+                    gps_datetime = gps_date+gps_time
+                    # print (gps_datetime)
                     dt = datetime.strptime(gps_datetime[0:-3], "%m%d%y%H%M%S")
-                    dt = dt.replace(tzinfo=pytz.utc)  # Asignar UTC explícitamente
-                    timestamp_sec = dt.timestamp()
-
-                    # Extraer los milisegundos correctamente
-                    millisec = float("0." + gps_time.split(".")[-1]) if "." in gps_time else 0.0
-                    timestamp = rospy.Time.from_sec(timestamp_sec + millisec)
-                    # timestamp = rospy.Time.from_sec(float(time.mktime(dt.timetuple()))+3600+float('0'+gps_datetime[-3:]))
+                    timestamp = rospy.Time.from_sec(float(time.mktime(dt.timetuple()))+3600+float('0'+gps_datetime[-3:]))
                     driver.add_sentence(gps_data, frame_id, timestamp)
                 except ValueError as e:
                     rospy.logwarn("Value error, likely due to missing fields in the NMEA message. Error was: %s. Please report this issue at github.com/ros-drivers/nmea_navsat_driver, including a bag file with the NMEA sentences that caused it." % e)
 
     except rospy.ROSInterruptException:
-        s.close()  # Cerrar correctamente el socket
+        GPS.close           #Close GPS socket when done

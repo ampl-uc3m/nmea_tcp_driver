@@ -1,0 +1,55 @@
+#!/usr/bin/env python3
+
+import rospy
+from nav_msgs.msg import Odometry
+import tf
+
+# Flag to indicate if odom_callback has been executed
+odom_received = False
+
+def odom_callback(msg):
+    global odom_received
+    # Set the flag to True since we received a message
+    odom_received = True
+
+    # Extract position and orientation from the odometry message
+    position = msg.pose.pose.position
+    orientation = msg.pose.pose.orientation
+
+    # Broadcast the transform from odom to base_link
+    br = tf.TransformBroadcaster()
+    br.sendTransform(
+        (position.x, position.y, position.z),  # Translation (x, y, z)
+        (orientation.x, orientation.y, orientation.z, orientation.w),  # Quaternion (x, y, z, w)
+        rospy.Time.now(),
+        "base_link",  # Child frame
+        "odom"        # Parent frame
+    )
+
+def publish_default_transform(event):
+    global odom_received
+    # Only publish the default transform if no odometry data has been received
+    if not odom_received:
+        br = tf.TransformBroadcaster()
+        br.sendTransform(
+            (0.0, 0.0, 0.0),  # Default translation (x, y, z)
+            (0.0, 0.0, 0.0, 1.0),  # Default quaternion (x, y, z, w)
+            rospy.Time.now(),
+            "base_link",  # Child frame
+            "odom"        # Parent frame
+        )
+
+def main():
+    rospy.init_node('utm_to_base_link_tf_broadcaster', anonymous=True)
+
+    # Subscribe to the UTM odometry topic
+    rospy.Subscriber('gnss/trimble/utm', Odometry, odom_callback)
+
+    # Set up a timer to publish the default transform every second
+    rospy.Timer(rospy.Duration(1.0), publish_default_transform)
+
+    rospy.loginfo("TF Broadcaster for odom -> base_link started...")
+    rospy.spin()
+
+if __name__ == '__main__':
+    main()

@@ -1,4 +1,4 @@
-#! /usr/bin/env python3
+#! /usr/bin/env python
 
 # Software License Agreement (BSD License)
 #
@@ -9,7 +9,7 @@
 # modification, are permitted provided that the following conditions
 # are met:
 #
-#  * Redistributions of source code must retain the above copyright
+#  * Redistributions of source code must retain the     above copyright
 #    notice, this list of conditions and the following disclaimer.
 #  * Redistributions in binary form must reproduce the above
 #    copyright notice, this list of conditions and the following
@@ -34,48 +34,37 @@
 
 import serial
 import socket               # Import socket module
-import rospy
-import os                   # Import libraries necessary for running the ifconfigg.sh file
+import os                   #import libraries necessary for running the ifconfigg.sh file
 import sys
-from nmea_msgs.msg import Sentence
-from libnmea_navsat_driver.driver import RosNMEADriver
+import libnmea_navsat_driver.driver
+import numpy as np
+import rospy
+import tf
+import time
+from datetime import datetime
+from sensor_msgs.msg import Imu
+from geometry_msgs.msg import PoseStamped
+from geometry_msgs.msg import TwistStamped
 
 if __name__ == '__main__':
-    rospy.init_node('nmea_topic_tcp_reader')
+    rospy.init_node('nmea_tcp_driver')
 
-    nmea_pub = rospy.Publisher("nmea_sentence", Sentence)
+    imu_pub = rospy.Publisher("gps_imu", Imu, queue_size=5)
+    imu_pose_pub = rospy.Publisher("gps_imu_pose", PoseStamped, queue_size=5)
+    vel_pub = rospy.Publisher("gps_vel", TwistStamped, queue_size=5)
 
     s = socket.socket()         # Create a socket object
-    host = rospy.get_param('~host', 'reach.local')
-    port = rospy.get_param('~port', 12346)
+    host = rospy.get_param('~host', '192.168.1.100')
+    port = rospy.get_param('~port', 5018)
 
     s.connect((host, port))
-    print("Device Connected")
+    print "Device Connected"
+    # frame_id = libnmea_navsat_driver.driver.RosNMEADriver.get_frame_id()
+    frame_id = "insia_gps"
 
-    # Get the frame_id
-    frame_id = RosNMEADriver.get_frame_id()
-
-    try:
+    while not rospy.is_shutdown():
         GPS = s.recv(1024)
-        while not rospy.is_shutdown():
-            GPS = s.recv(1024)
-            data = GPS.strip()   
+        data = GPS.strip()    
+        split = data.split()
         
-            split = data.split()
-            data = split[0]
-            for el in split:
-              if 'GPGGA' in el:
-                  data = el
-                  break
-              elif 'RMC' in el:
-                  data = el   
-            
-            sentence = Sentence()
-            sentence.header.stamp = rospy.get_rostime()
-	        sentence.header.frame_id = frame_id
-            sentence.sentence = data
-
-            nmea_pub.publish(sentence)
-
-    except rospy.ROSInterruptException:
-        GPS.close       #Close GPS socket when done
+    GPS.close           #Close GPS socket when done
