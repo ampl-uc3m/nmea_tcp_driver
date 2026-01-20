@@ -60,7 +60,7 @@ if __name__ == '__main__':
     s.connect((host, port))
     print "Device Connected"
     # frame_id = libnmea_navsat_driver.driver.RosNMEADriver.get_frame_id()
-    frame_id = "insia_gps"
+    frame_id = "gnss_trimble"
 
     while not rospy.is_shutdown():
         GPS = s.recv(1024)

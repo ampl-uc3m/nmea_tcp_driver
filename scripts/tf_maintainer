@@ -2,19 +2,28 @@
 
 import rospy
 from nav_msgs.msg import Odometry
+from sensor_msgs.msg import Imu
 import tf
+from geometry_msgs.msg import Quaternion
+from tf.transformations import euler_from_quaternion, quaternion_from_euler
 
 # Flag to indicate if odom_callback has been executed
 odom_received = False
+imu_orientation = None
+odom_pub = None
 
 def odom_callback(msg):
-    global odom_received
+    global odom_received, imu_orientation, odom_pub
     # Set the flag to True since we received a message
     odom_received = True
 
     # Extract position and orientation from the odometry message
     position = msg.pose.pose.position
-    orientation = msg.pose.pose.orientation
+    if imu_orientation != None:
+        # Use the IMU orientation if available
+        orientation = imu_orientation    
+    else:
+        orientation = msg.pose.pose.orientation
 
     # Broadcast the transform from odom to base_link
     br = tf.TransformBroadcaster()
@@ -25,6 +34,51 @@ def odom_callback(msg):
         "base_link",  # Child frame
         "odom"        # Parent frame
     )
+
+    odom_w_orientation = msg
+    odom_w_orientation.pose.pose.orientation = imu_orientation 
+    odom_pub.publish(odom_w_orientation)  # Publish the odometry message with the updated orientation
+    
+
+def imu_callback(msg):
+    # Step 1: Convert quaternion to Euler angles
+    orientation_q = msg.orientation
+    quaternion = [
+        orientation_q.x,
+        orientation_q.y,
+        orientation_q.z,
+        orientation_q.w
+    ]
+    roll, pitch, yaw = euler_from_quaternion(quaternion)
+
+    # Step 2: Modify yaw
+    rospy.logerr("Original yaw: %s", yaw)
+    yaw = -yaw + 3.14159 / 2  # π/2
+
+    # Optional: Normalize yaw to [-π, π]
+    if yaw > 3.14159:
+        yaw -= 2 * 3.14159
+    elif yaw < -3.14159:
+        yaw += 2 * 3.14159
+
+    rospy.logerr("Modified yaw: %s", yaw)
+    # Step 3: Convert back to quaternion
+    new_quat = quaternion_from_euler(roll, pitch, yaw)
+
+    # Step 4: Assign to global or use elsewhere
+    global imu_orientation
+    # imu_orientation = new_quat  # or construct a Quaternion message if needed
+    # Step 4: Create a Quaternion message
+    imu_orientation = Quaternion()
+    imu_orientation.x = new_quat[0]
+    imu_orientation.y = new_quat[1]
+    imu_orientation.z = new_quat[2]
+    imu_orientation.w = new_quat[3]
+
+    # Debug print (optional)
+    # rospy.loginfo("Modified quaternion: %s", imu_orientation)
+
+
 
 def publish_default_transform(event):
     global odom_received
@@ -40,10 +94,14 @@ def publish_default_transform(event):
         )
 
 def main():
+    global odom_pub
     rospy.init_node('utm_to_base_link_tf_broadcaster', anonymous=True)
 
     # Subscribe to the UTM odometry topic
     rospy.Subscriber('gnss/trimble/utm', Odometry, odom_callback)
+    rospy.Subscriber('gnss/trimble/imu', Imu, imu_callback)
+
+    odom_pub = rospy.Publisher('gnss/trimble/utm_w_orientation', Odometry, queue_size=1)
 
     # Set up a timer to publish the default transform every second
     rospy.Timer(rospy.Duration(1.0), publish_default_transform)
